@@ -5,14 +5,14 @@ from sklearn.tree import _tree
 
 class Tree:
     """Represents a node in a decision tree, identified by a unique integer id
-    
+
     Attributes:
         children (list of int): The id-s of the children associated with this node
         depth (int): The depth of this node in the tree
         id (int): The unique id of this node
         parent (id): The id of the parent node
         payload (tuple): Describes what this node does,
-            i.e. is it a non-terminal node (cut) or a terminal (leaf) 
+            i.e. is it a non-terminal node (cut) or a terminal (leaf)
     """
     def __init__(self, id, children, parent, depth, payload):
         self.id = id
@@ -32,10 +32,10 @@ class Tree:
 
     def print_out(self, node_dict):
         """Recursively prints a node and its children, given a dictionary with all the available nodes
-        
+
         Args:
             node_dict (dict id->node): All the available nodes
-        
+
         Returns:
             nothing
         """
@@ -45,14 +45,14 @@ class Tree:
 
     def to_tmva(self, nodetree, scale):
         """Writes out a TMVA-compatible XML string for a given node in the decision tree
-        
+
         Args:
             nodetree (dict int->Tree): The dictionary of the full tree
             scale (float): A scaling coefficient for the TMVA leaves (TMVA = sklearn * scale)
-        
+
         Returns:
             string: XML with the node
-        
+
         """
 
         kind = "c"
@@ -62,7 +62,7 @@ class Tree:
                 kind = "l"
             elif idx == 1:
                 kind = "r"
-        
+
         #handle leaf (terminal) node
         if len(self.children) == 0:
 
@@ -92,14 +92,14 @@ class Tree:
 
 def sklearn_to_nodetree(cls, nodetree, sklearn_tree, node_id=0, parent_id=-1, depth=-1):
     """Recursively converts a sklearn GradientBoosting{Classifier,Regressor} to a generic representation
-    
+
     Args:
         nodetree (dict id->Node): The output dictionary with the nodes
         sklearn_tree (DecisionTreeRegressor): The input decision tree
         node_id (int): the id of the root node
         parent_id (int): the id of the parent node
         depth (int): The current depth
-    
+
     Returns:
         dict int->Tree: The output node tree
     """
@@ -140,10 +140,10 @@ def sklearn_to_nodetree(cls, nodetree, sklearn_tree, node_id=0, parent_id=-1, de
 
 def xgbtree_to_nodetree(tree):
     """Converts an xgboost tree dump to an internal Tree representation
-    
+
     Args:
         tree (string): The model dump from xgboost using model.booster().get_dump()[ntree]
-    
+
     Returns:
         dict int->Tree: The tree structure
     """
@@ -165,7 +165,7 @@ def xgbtree_to_nodetree(tree):
         if match is not None:
             node_index = int(match.group(1))
             node_variable, threshold = match.group(2).split("<")
-            node_variable = int(node_variable.replace("f", ""))
+            # node_variable = int(node_variable.replace("f", ""))
             threshold = float(threshold)
             is_node = True
 
@@ -226,8 +226,8 @@ class BDT(object):
         #we assume that all variables are 'simple', that is, not expressions
         varstring = ""
         for i in range(len(self.feature_names)):
-            varstring += '<Variable VarIndex="{0}" Expression="{1}" Label="{1}" Title="{1}" Unit="" Internal="{1}" Type="F" Min="{2:.64E}" Max="{3:.64E}"/>\n'.format(
-                i, self.feature_names[i], 0, 0
+            varstring += '<Variable VarIndex="{0}" Expression="{1}" Label="{1}" Title="{1}" Unit="" Internal="{1}" Type="F" Min="{2}" Max="{3}"/>\n'.format(
+                i, self.feature_names[i], 0.0, 1000.0
             )
 
         if self.kind == "regression":
@@ -247,8 +247,8 @@ class BDT(object):
             if num_targets > 1:
                 raise Exception("TMVA does not support regression with vector values, need to specify a scalar target")
             for itgt, tgtname in enumerate(self.target_names):
-                target_string += '<Target Name="{0}" TargetIndex="{1}" Expression="{0}" Label="{0}" Title="{0}" Unit="" Internal="{0}" Type="F" Min="{2:.64E}" Max="{3:.64E}"/>\n'.format(
-                    tgtname, itgt, 0.0, 0.0
+                target_string += '<Target Name="{0}" TargetIndex="{1}" Expression="{0}" Label="{0}" Title="{0}" Unit="" Internal="{0}" Type="F" Min="{2}" Max="{3}"/>\n'.format(
+                    tgtname, itgt, 0.0, 1000.0
                 )
 
         elif self.kind == "binary" or self.kind == "multiclass":
@@ -268,7 +268,7 @@ class BDT(object):
             num_targets = 0
             target_string = ""
 
-          
+
         outfile = open(outfile_name, "w")
         outfile.write(
         """
@@ -317,7 +317,7 @@ class BDT(object):
                 "nvars": len(self.feature_names),
                 "varstring": varstring,
                 "learnrate": self.learning_rate,
-                
+
                 "nclasses": num_classes,
                 "class_string": class_string,
 
@@ -333,7 +333,7 @@ class BDT(object):
         itree = 0
         for tree in self.trees:
             outfile.write(
-                '<BinaryTree type="DecisionTree" boostWeight="0.0" itree="{0}">\n'.format(
+                '<BinaryTree type="DecisionTree" boostWeight="1.0" itree="{0}">\n'.format(
                     itree, self.learning_rate
                 )
             )
@@ -379,7 +379,7 @@ class BDT(object):
 
 class BDTxgboost(BDT):
     def __init__(self, model, feature_names, target_names):
-        
+
         self.model = model
         kind = None
         if model.objective.startswith("binary:logistic"):
@@ -405,13 +405,47 @@ class BDTxgboost(BDT):
 
         #apply TMVA transformation
         proba = 2.0 / (1.0 + np.exp(-2.0*proba)) - 1
-        
+
         return proba
+
+### FOR XGBOOST MODEL WITHOUT SKLEARN API
+class BDTxgboostcore(BDT):
+    def __init__(self, model, feature_names, target_names):
+
+        self.model = model
+        kind = None
+        attrs = model.attributes()
+        if model.objective.startswith("binary:logistic"):
+            kind = "binary"
+        elif model.objective.startswith("multiclass"):
+            kind = "multiclass"
+        else:
+            kind = "regression"
+        print model.objective, kind
+
+        trees = []
+        for tree_dump in model.booster().get_dump():
+            tree = xgbtree_to_nodetree(tree_dump)
+            trees += [tree]
+
+        super(BDTxgboost, self).__init__(trees, kind, feature_names, target_names, model.max_depth, model.learning_rate)
+
+    def eval(self, features):
+        proba = self.model.predict_proba(features)[:, 1]
+
+        #invert sigmoid
+        proba = -np.log(1.0/proba - 1.0)
+
+        #apply TMVA transformation
+        proba = 2.0 / (1.0 + np.exp(-2.0*proba)) - 1
+
+        return proba
+########
 
 class BDTsklearn(BDT):
 
     def __init__(self, model, feature_names, target_names):
-        
+
         self.model = model
 
         kind = None
@@ -437,15 +471,15 @@ class BDTsklearn(BDT):
 
     def eval(self, vals):
         """A TMVA-compatible evaluation function for a scikit-learn classifier
-        
+
         Args:
             vals (numpy array): An array (n_samples, n_features) of the input variables
-        
+
         Returns:
             numpy array: (n_samples, n_classes) array of the output
         """
-        
-        #need to scale the same way as done in TMVA    
+
+        #need to scale the same way as done in TMVA
         scale = 1.0 / self.model.n_estimators
 
         if isinstance(self.model, GradientBoostingClassifier):
@@ -464,7 +498,7 @@ class BDTsklearn(BDT):
                         if i != j:
                             norm[:, i] += np.exp(ret[:, j] - ret[:, i])
 
-                ret = 1.0 / (1.0 + norm)        
+                ret = 1.0 / (1.0 + norm)
                 return ret
             #binary classification
             elif self.model.n_classes_ == 2:
@@ -484,13 +518,13 @@ class BDTsklearn(BDT):
 
 def tree_to_tmva(outfile, nodetree, current_node, scale):
     """Recursively writes out a decision tree as an XML
-    
+
     Args:
         outfile (TYPE): Output file, must be writeable
         nodetree (TYPE): The dictionary with the nodes
         current_node (int): current node ID
         scale (float): The scale factor for each leaf
-    
+
     Returns:
         nothing
     """
